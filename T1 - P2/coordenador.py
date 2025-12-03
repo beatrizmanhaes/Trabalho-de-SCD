@@ -3,7 +3,7 @@ import threading
 import time
 import os
 import sys
-from collections import deque, defaultdict
+from collections import deque
 from datetime import datetime
 
 class Coordenador:
@@ -12,259 +12,272 @@ class Coordenador:
         self.port = port
         self.msg_size = msg_size
         
-        # Estruturas de dados compartilhadas - PROTEGIDAS por locks
-        self.fila_requests = deque()
-        self.contador_processos = defaultdict(int)
-        self.sockets_processos = {}
+        # Estruturas críticas - protegidas por lock
+        self.fila_espera = deque()  # Fila de processos esperando
+        self.processos_conectados = {}  # ID -> socket
+        self.contadores = {}  # Contagem de acessos por processo
+        self.processo_na_rc = None  # Processo atual na região crítica
         
-        # Mecanismos de exclusão mútua
-        self.lock_fila = threading.Lock()        # Para a fila de requests
-        self.lock_contadores = threading.Lock()  # Para os contadores
-        self.lock_sockets = threading.Lock()     # Para a lista de sockets
-        self.lock_log = threading.Lock()         # Para o arquivo de log
+        # Lock principal para sincronização
+        self.lock = threading.Lock()
         
-        self.log_file = "log_coordenador.txt"
+        # Estado do sistema
         self.executando = True
+        self.log_file = "log_coordenador.txt"
         
-        print("🔒 Coordenador multi-thread inicializado com mecanismos de sincronização")
-
-    def log_message(self, tipo, processo, direcao):
-        """Thread-safe logging"""
+        print("Coordenador inicializado")
+        print(f"Escutando em {host}:{port}")
+    
+    def registrar_log(self, tipo, processo, direcao):
+        """Registra um evento no log"""
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-        with self.lock_log:
-            with open(self.log_file, 'a', encoding='utf-8') as f:
-                f.write(f"{timestamp} | {tipo} | {processo} | {direcao}\n")
-
+        mensagem = f"{timestamp} | {tipo} | {processo} | {direcao}"
+        
+        # Escrever no arquivo
+        with open(self.log_file, 'a') as f:
+            f.write(mensagem + '\n')
+        
+        # Mostrar no console
+        print(mensagem)
+    
+    def enviar_grant(self, processo_id):
+        """Envia mensagem GRANT para um processo"""
+        if processo_id in self.processos_conectados:
+            try:
+                mensagem = f"2|{processo_id}|".ljust(self.msg_size, '0')
+                self.processos_conectados[processo_id].send(mensagem.encode())
+                self.registrar_log("GRANT", processo_id, "ENVIADA")
+                print(f"Concedido acesso ao Processo {processo_id}")
+                return True
+            except Exception as e:
+                print(f"Erro ao enviar GRANT para Processo {processo_id}: {e}")
+                return False
+        else:
+            print(f"Processo {processo_id} não está conectado")
+            return False
+    
     def processar_mensagem(self, mensagem, processo_id):
-        """Processa mensagens recebidas dos processos - Thread-safe"""
+        """Processa uma mensagem recebida de um processo"""
         try:
             partes = mensagem.split('|')
             if len(partes) < 2:
                 return
-                
-            tipo_msg = partes[0]
             
-            if tipo_msg == '1':  # REQUEST
-                with self.lock_fila:
-                    if processo_id not in self.fila_requests:
-                        self.fila_requests.append(processo_id)
-                        print(f"📥 REQUEST do Processo {processo_id} - Fila: {list(self.fila_requests)}")
-                    self.log_message("REQUEST", processo_id, "RECEBIDA")
-                
-                # Verificar se pode conceder acesso imediatamente
-                with self.lock_fila:
-                    if self.fila_requests and self.fila_requests[0] == processo_id:
+            tipo = partes[0]
+            
+            with self.lock:
+                if tipo == '1':  # REQUEST
+                    self.registrar_log("REQUEST", processo_id, "RECEBIDA")
+                    print(f"Processo {processo_id} solicitou acesso")
+                    
+                    # Adicionar à fila se não estiver
+                    if processo_id not in self.fila_espera:
+                        self.fila_espera.append(processo_id)
+                        print(f"Fila atual: {list(self.fila_espera)}")
+                    
+                    # Se nenhum processo está na RC, conceder acesso
+                    if self.processo_na_rc is None and self.fila_espera[0] == processo_id:
+                        self.processo_na_rc = processo_id
                         self.enviar_grant(processo_id)
-                        
-            elif tipo_msg == '3':  # RELEASE
-                with self.lock_fila:
-                    if self.fila_requests and self.fila_requests[0] == processo_id:
-                        processo_liberado = self.fila_requests.popleft()
-                        
-                        with self.lock_contadores:
-                            self.contador_processos[processo_id] += 1
-                        
-                        self.log_message("RELEASE", processo_id, "RECEBIDA")
-                        print(f"✅ RELEASE do Processo {processo_id} - Fila: {list(self.fila_requests)}")
-                        
-                    # Concede acesso ao próximo da fila
-                    if self.fila_requests:
-                        proximo = self.fila_requests[0]
+                
+                elif tipo == '3':  # RELEASE
+                    self.registrar_log("RELEASE", processo_id, "RECEBIDA")
+                    print(f"Processo {processo_id} liberou a região crítica")
+                    
+                    # Atualizar contador
+                    if processo_id not in self.contadores:
+                        self.contadores[processo_id] = 0
+                    self.contadores[processo_id] += 1
+                    
+                    # Liberar região crítica
+                    if self.processo_na_rc == processo_id:
+                        self.processo_na_rc = None
+                    
+                    # Remover da fila (deve ser o primeiro)
+                    if self.fila_espera and self.fila_espera[0] == processo_id:
+                        self.fila_espera.popleft()
+                        print(f"Fila após liberação: {list(self.fila_espera)}")
+                    
+                    # Conceder acesso ao próximo da fila, se houver
+                    if self.fila_espera and self.processo_na_rc is None:
+                        proximo = self.fila_espera[0]
+                        self.processo_na_rc = proximo
                         self.enviar_grant(proximo)
-                        
-        except Exception as e:
-            print(f"❌ Erro ao processar mensagem: {e}")
-
-    def enviar_grant(self, processo_id):
-        """Envia GRANT para um processo - Thread-safe"""
-        mensagem = f"2|{processo_id}|".ljust(self.msg_size, '0')
         
-        with self.lock_sockets:
-            if processo_id in self.sockets_processos:
-                try:
-                    self.sockets_processos[processo_id].send(mensagem.encode('utf-8'))
-                    self.log_message("GRANT", processo_id, "ENVIADA")
-                    print(f"🎯 GRANT enviado para Processo {processo_id}")
-                except Exception as e:
-                    print(f"❌ Erro ao enviar GRANT para processo {processo_id}: {e}")
-
-    def interface_thread(self):
-        """Thread para interface do usuário - Comandos do terminal"""
+        except Exception as e:
+            print(f"Erro ao processar mensagem do Processo {processo_id}: {e}")
+    
+    def interface_usuario(self):
+        """Interface de comandos do coordenador"""
         while self.executando:
             try:
-                print("\n" + "="*50)
-                print("💻 INTERFACE DO COORDENADOR - COMANDOS DISPONÍVEIS:")
-                print("="*50)
-                comando = input("[1] Ver Fila | [2] Ver Contadores | [3] Sair\n> ")
+                print("\n" + "="*40)
+                print("COMANDOS DO COORDENADOR")
+                print("="*40)
+                print("1. Ver fila de espera")
+                print("2. Ver processo na região crítica")
+                print("3. Ver contadores de acesso")
+                print("4. Sair")
+                print("-"*40)
                 
-                if comando == '1':
-                    with self.lock_fila:
-                        fila_atual = list(self.fila_requests)
-                    print(f"📋 Fila atual de requests: {fila_atual}")
+                opcao = input("Escolha uma opção: ")
+                
+                with self.lock:
+                    if opcao == '1':
+                        print(f"\nFila de espera: {list(self.fila_espera)}")
+                        print(f"Total na fila: {len(self.fila_espera)}")
                     
-                elif comando == '2':
-                    with self.lock_contadores:
-                        contadores = dict(self.contador_processos)
+                    elif opcao == '2':
+                        if self.processo_na_rc:
+                            print(f"\nProcesso na região crítica: {self.processo_na_rc}")
+                        else:
+                            print("\nNenhum processo na região crítica")
                     
-                    print("📊 Contadores de processos atendidos:")
-                    if contadores:
-                        for pid, count in sorted(contadores.items()):
-                            print(f"   Processo {pid}: {count} vezes")
+                    elif opcao == '3':
+                        print("\nContadores de acesso:")
+                        if self.contadores:
+                            for pid, count in sorted(self.contadores.items()):
+                                print(f"  Processo {pid}: {count} vez(es)")
+                        else:
+                            print("  Nenhum acesso registrado")
+                    
+                    elif opcao == '4':
+                        print("\nEncerrando coordenador...")
+                        self.executando = False
+                        os._exit(0)
+                    
                     else:
-                        print("   Nenhum processo foi atendido ainda")
-                        
-                elif comando == '3':
-                    print("👋 Encerrando coordenador...")
-                    self.executando = False
-                    os._exit(0)
-                    
+                        print("\nOpção inválida")
+            
             except KeyboardInterrupt:
-                print("\n🛑 Interface interrompida")
                 break
             except Exception as e:
-                print(f"❌ Erro na interface: {e}")
-
-    def handle_processo(self, conn, addr, processo_id):
-        """Thread para lidar com cada processo conectado"""
-        # Registrar socket do processo
-        with self.lock_sockets:
-            self.sockets_processos[processo_id] = conn
+                print(f"Erro na interface: {e}")
+    
+    def lidar_com_processo(self, conexao, endereco, processo_id):
+        """Gerencia a comunicação com um processo"""
+        with self.lock:
+            self.processos_conectados[processo_id] = conexao
         
-        print(f"✅ Processo {processo_id} conectado de {addr}")
-        print(f"🧵 Thread criada para Processo {processo_id}")
+        print(f"Processo {processo_id} conectado de {endereco}")
         
         try:
             while self.executando:
                 try:
-                    data = conn.recv(self.msg_size)
-                    if not data:
-                        break  # Conexão fechada
+                    dados = conexao.recv(self.msg_size)
+                    if not dados:
+                        break
                     
-                    mensagem = data.decode('utf-8').strip()
+                    mensagem = dados.decode().strip()
                     if mensagem:
-                        print(f"📨 Mensagem de {processo_id}: {mensagem}")
                         self.processar_mensagem(mensagem, processo_id)
-                        
+                
                 except socket.timeout:
-                    continue  # Timeout normal, continuar verificando
+                    continue
                 except Exception as e:
-                    if self.executando:
-                        print(f"❌ Erro ao receber dados do Processo {processo_id}: {e}")
+                    print(f"Erro ao receber do Processo {processo_id}: {e}")
                     break
-                    
+        
         except Exception as e:
-            print(f"❌ Erro na thread do Processo {processo_id}: {e}")
+            print(f"Erro na conexão com Processo {processo_id}: {e}")
+        
         finally:
-            # Limpeza ao desconectar
-            conn.close()
-            with self.lock_sockets:
-                if processo_id in self.sockets_processos:
-                    del self.sockets_processos[processo_id]
+            # Limpeza
+            conexao.close()
             
-            # Remover da fila se estiver nela
-            with self.lock_fila:
-                if processo_id in self.fila_requests:
-                    self.fila_requests.remove(processo_id)
-                    print(f"🗑️  Processo {processo_id} removido da fila (desconectado)")
+            with self.lock:
+                if processo_id in self.processos_conectados:
+                    del self.processos_conectados[processo_id]
+                
+                # Remover da fila
+                if processo_id in self.fila_espera:
+                    self.fila_espera.remove(processo_id)
+                    print(f"Processo {processo_id} removido da fila")
+                
+                # Se era o processo na RC, liberar
+                if self.processo_na_rc == processo_id:
+                    self.processo_na_rc = None
+                    print(f"Processo {processo_id} removido da região crítica")
             
-            print(f"🔌 Processo {processo_id} desconectado")
-
-    def aceitar_conexoes_thread(self):
-        """Thread principal para aceitar conexões de processos"""
-        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server_socket.settimeout(2.0)  # Timeout para verificar se ainda está executando
+            print(f"Processo {processo_id} desconectado")
+            
+            # Tentar conceder ao próximo
+            with self.lock:
+                if self.fila_espera and self.processo_na_rc is None:
+                    proximo = self.fila_espera[0]
+                    self.processo_na_rc = proximo
+                    self.enviar_grant(proximo)
+    
+    def iniciar_servidor(self):
+        """Inicia o servidor para aceitar conexões"""
+        servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        servidor.settimeout(1)
         
         try:
-            server_socket.bind((self.host, self.port))
-            server_socket.listen(10)  # Até 10 conexões pendentes
-            print(f"🎯 Coordenador ouvindo em {self.host}:{self.port}")
-            print("🟢 Aguardando conexões de processos...")
-            print("💡 Execute 'python processo.py 1' em outro terminal")
+            servidor.bind((self.host, self.port))
+            servidor.listen(5)
             
-            processo_counter = 1
+            processo_id = 1
             
             while self.executando:
                 try:
-                    conn, addr = server_socket.accept()
-                    conn.settimeout(1.0)  # Timeout para recebimento de dados
+                    conexao, endereco = servidor.accept()
+                    conexao.settimeout(1)
                     
-                    # Criar thread para cada processo
+                    # Criar thread para o processo
                     thread = threading.Thread(
-                        target=self.handle_processo, 
-                        args=(conn, addr, processo_counter),
-                        name=f"ProcessoHandler-{processo_counter}",
+                        target=self.lidar_com_processo,
+                        args=(conexao, endereco, processo_id),
                         daemon=True
                     )
                     thread.start()
                     
-                    processo_counter += 1
-                    
+                    processo_id += 1
+                
                 except socket.timeout:
-                    continue  # Timeout normal, verificar se ainda está executando
-                except OSError as e:
-                    if self.executando:
-                        print(f"❌ Erro de socket: {e}")
-                    break
+                    continue
                 except Exception as e:
                     if self.executando:
-                        print(f"❌ Erro ao aceitar conexão: {e}")
-                    
+                        print(f"Erro ao aceitar conexão: {e}")
+        
         except Exception as e:
-            print(f"💥 Erro no servidor: {e}")
+            print(f"Erro no servidor: {e}")
+        
         finally:
-            server_socket.close()
-            print("🔒 Socket do servidor fechado")
-
+            servidor.close()
+    
     def iniciar(self):
-        """Método principal para iniciar o coordenador multi-thread"""
-        print("=" * 60)
-        print("🚀 SISTEMA DE EXCLUSÃO MÚTUA - COORDENADOR MULTI-THREAD")
-        print("=" * 60)
-        print("📝 Características:")
-        print("   • Thread para aceitar conexões")
-        print("   • Thread para interface de comandos") 
-        print("   • Uma thread por processo conectado")
-        print("   • Mecanismos de sincronização: Locks")
-        print("=" * 60)
+        """Inicia o coordenador"""
+        print("="*50)
+        print("SISTEMA DE EXCLUSÃO MÚTUA - COORDENADOR")
+        print("="*50)
         
         # Limpar arquivos antigos
-        with self.lock_log:
-            open(self.log_file, 'w', encoding='utf-8').close()
-            open('resultado.txt', 'w', encoding='utf-8').close()
-        print("🧹 Arquivos antigos limpos")
+        open(self.log_file, 'w').close()
+        open('resultado.txt', 'w').close()
         
-        # Iniciar thread para aceitar conexões
-        conexoes_thread = threading.Thread(
-            target=self.aceitar_conexoes_thread, 
-            name="AceitarConexoes",
-            daemon=True
-        )
-        conexoes_thread.start()
-        print("🔧 Thread de aceitação de conexões iniciada")
+        # Iniciar thread do servidor
+        servidor_thread = threading.Thread(target=self.iniciar_servidor, daemon=True)
+        servidor_thread.start()
         
-        # Iniciar thread para interface do usuário
-        interface_thread = threading.Thread(
-            target=self.interface_thread, 
-            name="InterfaceUsuario",
-            daemon=True
-        )
+        # Iniciar interface
+        interface_thread = threading.Thread(target=self.interface_usuario, daemon=True)
         interface_thread.start()
-        print("🎮 Thread de interface iniciada")
         
-        # Manter thread principal ativa
+        # Loop principal
         try:
             while self.executando:
-                time.sleep(1)
+                time.sleep(0.5)
         except KeyboardInterrupt:
-            print("\n🛑 Coordenador interrompido pelo usuário")
+            print("\nCoordenador interrompido")
+        finally:
             self.executando = False
+            print("Coordenador finalizado")
 
 if __name__ == "__main__":
     try:
         coordenador = Coordenador()
         coordenador.iniciar()
     except Exception as e:
-        print(f"💥 Erro fatal: {e}")
-    finally:
-        print("👋 Coordenador finalizado")
+        print(f"Erro fatal: {e}")

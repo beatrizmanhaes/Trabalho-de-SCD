@@ -1,183 +1,92 @@
 import os
-from collections import defaultdict
 
-def verificar_resultado():
-    """Verifica o arquivo resultado.txt e o log do coordenador"""
-    
-    print("=" * 50)
-    print("VERIFICAÇÃO DOS RESULTADOS")
-    print("=" * 50)
-    
-    # Verificar se os arquivos existem
-    if not os.path.exists('resultado.txt'):
-        print("❌ Arquivo resultado.txt não encontrado!")
-        return
+def verificar_garantia_grant_release():
+    """
+    Verifica se APÓS CADA GRANT há um RELEASE
+    """
+    print("="*70)
+    print("VERIFICAÇÃO: APÓS CADA GRANT HÁ UM RELEASE")
+    print("="*70)
     
     if not os.path.exists('log_coordenador.txt'):
-        print("❌ Arquivo log_coordenador.txt não encontrado!")
+        print("ERRO: log_coordenador.txt não encontrado")
         return
     
-    # 1. VERIFICAR ARQUIVO resultado.txt
-    print("\n1. VERIFICAÇÃO DO resultado.txt")
-    print("-" * 30)
-    
-    with open('resultado.txt', 'r') as f:
-        linhas = f.readlines()
-    
-    print(f"Total de linhas no resultado.txt: {len(linhas)}")
-    
-    # Contar entradas por processo
-    contadores_processos = defaultdict(int)
-    timestamps = []
-    
-    for i, linha in enumerate(linhas, 1):
-        linha = linha.strip()
-        if not linha:
-            continue
-            
-        try:
-            # Formato esperado: "Processo X | YYYY-MM-DD HH:MM:SS.mmm"
-            partes = linha.split('|')
-            processo_info = partes[0].strip()
-            timestamp = partes[1].strip()
-            
-            processo_id = int(processo_info.split()[-1])
-            contadores_processos[processo_id] += 1
-            timestamps.append((processo_id, timestamp, i))
-            
-        except (IndexError, ValueError) as e:
-            print(f"❌ Erro na linha {i}: {linha} - {e}")
-    
-    # Mostrar estatísticas por processo
-    print("\nEntradas por processo:")
-    for pid in sorted(contadores_processos.keys()):
-        count = contadores_processos[pid]
-        print(f"  Processo {pid}: {count} entradas")
-    
-    # Verificar ordem dos timestamps
-    print("\nVerificação da ordem temporal:")
-    problemas_ordem = 0
-    for i in range(1, len(timestamps)):
-        pid_atual, ts_atual, linha_atual = timestamps[i]
-        pid_anterior, ts_anterior, linha_anterior = timestamps[i-1]
-        
-        # Verificar se o timestamp atual é maior ou igual ao anterior
-        if ts_atual < ts_anterior:
-            print(f"  ❌ Problema de ordem na linha {linha_atual}:")
-            print(f"     Linha {linha_anterior}: Processo {pid_anterior} | {ts_anterior}")
-            print(f"     Linha {linha_atual}: Processo {pid_atual} | {ts_atual}")
-            problemas_ordem += 1
-    
-    if problemas_ordem == 0:
-        print("  ✅ Todas as entradas estão em ordem temporal correta")
-    
-    # 2. VERIFICAR LOG DO COORDENADOR
-    print("\n2. VERIFICAÇÃO DO log_coordenador.txt")
-    print("-" * 40)
-    
     with open('log_coordenador.txt', 'r') as f:
-        logs = f.readlines()
+        eventos = [linha.strip() for linha in f if linha.strip()]
     
-    print(f"Total de entradas no log: {len(logs)}")
+    print(f"Total de eventos: {len(eventos)}")
+    print("\nANÁLISE DA SEQUÊNCIA:")
+    print("-"*70)
     
-    # Analisar sequência de mensagens
-    sequencia_por_processo = defaultdict(list)
+    # Buscar padrões GRANT -> (qualquer coisa) -> RELEASE
+    grants_por_processo = {}
+    problemas = []
+    i = 0
     
-    for log in logs:
-        partes = log.strip().split(' | ')
+    while i < len(eventos):
+        partes = eventos[i].split(' | ')
         if len(partes) >= 4:
-            timestamp, tipo, processo, direcao = partes[0], partes[1], partes[2], partes[3]
-            try:
-                pid = int(processo)
-                sequencia_por_processo[pid].append((tipo, direcao))
-            except ValueError:
-                continue
-    
-    # Verificar padrão GRANT → RELEASE para cada processo
-    print("\nVerificação do padrão GRANT → RELEASE:")
-    problemas_padrao = 0
-    
-    for pid, sequencia in sequencia_por_processo.items():
-        print(f"\nProcesso {pid}:")
-        grant_count = 0
-        release_count = 0
-        
-        for i, (tipo, direcao) in enumerate(sequencia):
-            if tipo == "GRANT" and direcao == "ENVIADA":
-                grant_count += 1
-                print(f"  GRANT #{grant_count}")
+            timestamp, tipo, processo_str, direcao = partes[0], partes[1], partes[2], partes[3]
+            
+            if tipo == 'GRANT' and direcao == 'ENVIADA':
+                print(f"\n✓ ENCONTRADO GRANT para Processo {processo_str}")
+                print(f"  {eventos[i]}")
                 
-            elif tipo == "RELEASE" and direcao == "RECEBIDA":
-                release_count += 1
-                print(f"  RELEASE #{release_count}")
+                # Registrar este GRANT
+                grants_por_processo[processo_str] = grants_por_processo.get(processo_str, 0) + 1
                 
-                # Verificar se temos um GRANT para cada RELEASE
-                if release_count > grant_count:
-                    print(f"  ❌ RELEASE sem GRANT correspondente!")
-                    problemas_padrao += 1
+                # Procurar RELEASE correspondente
+                encontrou_release = False
+                j = i + 1
+                
+                while j < len(eventos):
+                    partes2 = eventos[j].split(' | ')
+                    if len(partes2) >= 4:
+                        tipo2, processo_str2, direcao2 = partes2[1], partes2[2], partes2[3]
+                        
+                        # Verificar se encontrou outro GRANT antes do RELEASE
+                        if tipo2 == 'GRANT' and direcao2 == 'ENVIADA':
+                            print(f"  ✗ PROBLEMA: Outro GRANT antes do RELEASE!")
+                            print(f"    {eventos[j]}")
+                            problemas.append(f"GRANT para {processo_str2} antes do RELEASE de {processo_str}")
+                            break
+                        
+                        # Verificar se encontrou o RELEASE correto
+                        if tipo2 == 'RELEASE' and direcao2 == 'RECEBIDA' and processo_str2 == processo_str:
+                            print(f"  ✓ ENCONTRADO RELEASE correspondente")
+                            print(f"    {eventos[j]}")
+                            encontrou_release = True
+                            i = j  # Avançar até o RELEASE
+                            break
+                    
+                    j += 1
+                
+                if not encontrou_release:
+                    print(f"  ✗ PROBLEMA: GRANT sem RELEASE correspondente!")
+                    problemas.append(f"GRANT para {processo_str} sem RELEASE")
         
-        # Verificar contagens finais
-        if grant_count == release_count:
-            print(f"  ✅ GRANTs: {grant_count}, RELEASEs: {release_count} - BALANCEADO")
-        else:
-            print(f"  ❌ GRANTs: {grant_count}, RELEASEs: {release_count} - DESBALANCEADO")
-            problemas_padrao += 1
+        i += 1
     
-    # 3. RESUMO FINAL
-    print("\n" + "=" * 50)
-    print("RESUMO FINAL")
-    print("=" * 50)
+    # Resumo
+    print("\n" + "="*70)
+    print("RESUMO DA VERIFICAÇÃO")
+    print("="*70)
     
-    total_entradas = len(linhas)
-    total_processos = len(contadores_processos)
-    total_logs = len(logs)
-    
-    print(f"• Entradas em resultado.txt: {total_entradas}")
-    print(f"• Processos que escreveram: {total_processos}")
-    print(f"• Entradas no log: {total_logs}")
-    print(f"• Problemas de ordem temporal: {problemas_ordem}")
-    print(f"• Problemas no padrão GRANT/RELEASE: {problemas_padrao}")
-    
-    if problemas_ordem == 0 and problemas_padrao == 0:
-        print("\n🎉 TODAS AS VERIFICAÇÕES PASSARAM! O sistema funcionou corretamente.")
+    if problemas:
+        print(f"PROBLEMAS ENCONTRADOS ({len(problemas)}):")
+        for p in problemas:
+            print(f"  • {p}")
+        print(f"\n✗ O sistema NÃO garante que após cada GRANT há um RELEASE")
     else:
-        print(f"\n⚠️  Foram encontrados {problemas_ordem + problemas_padrao} problema(s)")
-
-def analisar_log_detalhado():
-    """Análise mais detalhada do log do coordenador"""
+        print("✓ TODOS OS GRANTS TÊM RELEASE CORRESPONDENTE")
+        print("✓ O sistema GARANTE que após cada GRANT há um RELEASE")
+        print("✓ Requisito do trabalho SATISFEITO")
     
-    if not os.path.exists('log_coordenador.txt'):
-        print("Arquivo log_coordenador.txt não encontrado!")
-        return
-    
-    print("\n" + "=" * 50)
-    print("ANÁLISE DETALHADA DO LOG")
-    print("=" * 50)
-    
-    with open('log_coordenador.txt', 'r') as f:
-        logs = [line.strip() for line in f if line.strip()]
-    
-    # Estatísticas por tipo de mensagem
-    stats = defaultdict(int)
-    
-    for log in logs:
-        partes = log.split(' | ')
-        if len(partes) >= 2:
-            tipo = partes[1]
-            stats[tipo] += 1
-    
-    print("Estatísticas de mensagens:")
-    for tipo, count in sorted(stats.items()):
-        print(f"  {tipo}: {count}")
-    
-    # Mostrar sequência completa
-    print("\nSequência completa de eventos:")
-    for i, log in enumerate(logs[:20], 1):  # Mostrar apenas primeiros 20
-        print(f"  {i:2d}. {log}")
-    
-    if len(logs) > 20:
-        print(f"  ... e mais {len(logs) - 20} eventos")
+    # Estatísticas
+    print(f"\nESTATÍSTICAS:")
+    for processo in sorted(grants_por_processo.keys()):
+        print(f"  Processo {processo}: {grants_por_processo[processo]} GRANT(s)")
 
 if __name__ == "__main__":
-    verificar_resultado()
-    analisar_log_detalhado()
+    verificar_garantia_grant_release()
