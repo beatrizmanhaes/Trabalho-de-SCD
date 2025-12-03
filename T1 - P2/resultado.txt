@@ -1,6 +1,20 @@
-Processo 1 | 2025-12-03 19:18:04.870 | Iteracao 1
-Processo 2 | 2025-12-03 19:18:05.870 | Iteracao 1
-Processo 1 | 2025-12-03 19:18:06.871 | Iteracao 2
-Processo 2 | 2025-12-03 19:18:07.872 | Iteracao 2
-Processo 1 | 2025-12-03 19:18:08.872 | Iteracao 3
-Processo 2 | 2025-12-03 19:18:09.873 | Iteracao 3
+Processo 1 | 19:42:42.711
+Processo 2 | 19:42:43.714
+Processo 3 | 19:42:44.715
+Processo 4 | 19:42:45.716
+Processo 1 | 19:42:46.717
+Processo 2 | 19:42:47.719
+Processo 3 | 19:42:48.720
+Processo 4 | 19:42:49.722
+Processo 1 | 19:42:50.723
+Processo 2 | 19:42:51.724
+Processo 3 | 19:42:52.725
+Processo 4 | 19:42:53.726
+Processo 1 | 19:42:54.727
+Processo 2 | 19:42:55.728
+Processo 3 | 19:42:56.729
+Processo 4 | 19:42:57.729
+Processo 1 | 19:42:58.731
+Processo 2 | 19:42:59.732
+Processo 3 | 19:43:00.733
+Processo 4 | 19:43:01.734
