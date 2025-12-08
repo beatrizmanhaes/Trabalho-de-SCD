@@ -55,7 +55,7 @@ def validar():
                 pass
             
         n_total = len(contagem)
-        r_esperado = 5 
+        r_esperado = 3 
         total_obtido = len(lines)
 
         print(f"Total de Processos distintos detectados: {n_total}")
