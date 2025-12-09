@@ -1,12 +1,21 @@
 import socket, sys, time, datetime, os
 
-# configurações do Processo
+# Configurações do Processo
 HOST, PORT, F_SIZE = '127.0.0.1', 5000, 10 # endIP, porta e tamanho fixo das mensagens 
-REPETICOES, K_SLEEP = 3, 1 # r = 3, k = 1 segundo # numero de vezes que o processor tentará entrar na RC, tempo que passará na RC
+# K_SLEEP permanece fixo, mas REPETICOES agora é lido de sys.argv
+K_SLEEP = 1 # k = 1 segundo # tempo que passará na RC
 
-# requer que o ID do processo seja passado como argumento na linha de comando
-if len(sys.argv) < 2: sys.exit("Uso: python processo.py <ID>")
-pid = sys.argv[1]
+# Requer que o ID do processo e o número de repetições (r) sejam passados como argumentos
+if len(sys.argv) != 3: 
+    sys.exit("Uso: python processo.py <ID> <r_repeticoes>")
+
+pid = sys.argv[1] # Armazena o ID do processo
+try:
+    # REPETICOES é lido do segundo argumento (r)
+    REPETICOES = int(sys.argv[2]) 
+    # numero de vezes que o processo tentará entrar na RC
+except ValueError:
+    sys.exit("O segundo argumento (r_repeticoes) deve ser um número inteiro.")
 
 sock = None
 try:
@@ -17,7 +26,7 @@ try:
         # envia mensagem de tamanho fixo
         sock.send(f"{tipo}|{pid}|".ljust(F_SIZE, '0').encode()) 
 
-    for i in range(REPETICOES): # implementa o ciclo de vida da exclusão mutua
+    for i in range(REPETICOES): # implementa o ciclo de vida da exclusão mutua (r vezes)
         enviar('1') # 1. REQUEST
         
         # 2. espera GRANT
@@ -28,7 +37,7 @@ try:
         # 3. região crítica (RC)
         with open('resultado.txt', 'a') as f:
             ts = datetime.datetime.now().strftime('%H:%M:%S.%f')[:-3]
-            f.write(f"Processo {pid} | {ts}\n") # retorna quanto tempo um processo ficou na RC 
+            f.write(f"Processo {pid} | {ts}\n") # registra o PID e o timestamp de acesso à RC
         
         time.sleep(K_SLEEP) # aguarda k segundos
         

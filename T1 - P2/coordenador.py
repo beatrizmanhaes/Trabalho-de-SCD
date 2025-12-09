@@ -8,6 +8,7 @@ LOG_FILE = 'log_coordenador.txt'
 # estado global e locks de sincronização
 log_lock = threading.Lock() # trava para garantir escrita de log segura 
 fila, sockets, lock, req_atual = queue.Queue(), {}, threading.Lock(), None
+
 """sockets: dicionario que mapeia o PID ao seu objeto de conexão para permitir o envio de mensagens
 lock: protege as variaveis fila, sockets e req_atual
 req_atual: armazena o PID do processo que está atualmente na região critica"""
