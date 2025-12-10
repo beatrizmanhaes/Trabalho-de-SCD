@@ -1,10 +1,6 @@
 import subprocess, time, sys, os
 
 def run(n_procs, r_reps):
-    # Limpa arquivos anteriores
-    for f in ['resultado.txt', 'log_coordenador.txt']:
-        if os.path.exists(f): os.remove(f)
-
     print(f"Iniciando Coordenador e {n_procs} processos com r={r_reps} repetições...")
     coord = subprocess.Popen([sys.executable, 'coordenador.py'])
     time.sleep(2) # Tempo para coord iniciar
@@ -18,7 +14,7 @@ def run(n_procs, r_reps):
     # Aguarda a conclusão de todos os processos
     for p in procs: p.wait()
     
-    time.sleep(1) # Garante que o último RELEASE seja logado
+    # time.sleep(1) # Garante que o último RELEASE seja logado
     
     print("Processos finalizados. Encerrando coordenador...")
     coord.terminate()

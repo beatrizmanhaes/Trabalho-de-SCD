@@ -63,10 +63,7 @@ def core():
                 livre = (req_atual is None) # RC livre se req_atual for None
             
             if livre:
-                try:
-                    prox = fila.get(block=False) # pega o proximo processo da fila
-                except queue.Empty:
-                    continue # já foi removido por outra thread (imprevisto raro)
+                prox = fila.get(block=False) # pega o proximo processo da fila
                 
                 with lock:
                     if prox in sockets: # confirma se o processo ainda está conectado

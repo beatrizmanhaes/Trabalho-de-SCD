@@ -38,8 +38,7 @@ def validar(r_esperado):
                 else:
                     ativo = None # RC LIBERADA, espera o próximo GRANT
         
-        if erros == 0: print("[OK] Sequencia GRANT -> RELEASE esta logicamente correta (Exclusao Mutua respeitada).")
-        else: print(f"[FALHA] {erros} erros de logica no log.")
+        if erros != 0: print(f"[FALHA] {erros} erros de logica no log.")
     except Exception as e: print(f"[FALHA] Erro ao analisar log: {e}")
 
 
