@@ -3,9 +3,8 @@ from datetime import datetime
 
 # configurações do Sistema
 HOST, PORT, F_SIZE = '127.0.0.1', 5000, 10 # endIP, porta e tamanho fixo das mensagens
-LOG_FILE = 'log_coordenador.txt'
 
-# estado global e locks de sincronização
+# variaveis globais e lock de sincronização
 log_lock = threading.Lock() # trava para garantir escrita de log segura 
 fila, sockets, lock, req_atual = queue.Queue(), {}, threading.Lock(), None
 
@@ -20,22 +19,22 @@ def log(tipo, pid, dir):
     
     print(mensagem) 
     with log_lock:
-        with open(LOG_FILE, 'a') as f:
+        with open('log_coordenador.txt', 'a') as f:
             f.write(mensagem + '\n')
 
-def handle(conn, addr): # conexão e endereço
+def handle(conn, addr): 
     # gerencia a comunicação e o ciclo de vida de um processo cliente na fila
     pid = None
     try:
         while True:
-            data = conn.recv(F_SIZE) 
-            if not data: break
+            data = conn.recv(F_SIZE) # recebe os dados do socket
+            if not data: break 
             
-            mensagem = data.decode().strip()
+            mensagem = data.decode().strip() # converte os bytes recebidos em string
             tipo, pid_str, _ = mensagem.split('|')
             pid = pid_str
             
-            with lock: sockets[pid] = conn
+            with lock: sockets[pid] = conn # armazena do dicionario o socket relacionado ao processo
             
             if tipo == '1': # REQUEST
                 # LOG NATURAL: registra a REQUEST assim que ela é recebida
@@ -67,7 +66,7 @@ def core():
                 try:
                     prox = fila.get(block=False) # pega o proximo processo da fila
                 except queue.Empty:
-                    continue # já foi removido por outra thread (imprevisto/raro)
+                    continue # já foi removido por outra thread (imprevisto raro)
                 
                 with lock:
                     if prox in sockets: # confirma se o processo ainda está conectado
@@ -102,8 +101,8 @@ if __name__ == "__main__":
         for f in ['resultado.txt', 'log_coordenador.txt']:
             if os.path.exists(f): os.remove(f)
         
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM) # cria socket principal
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1) # reinicia servidor automaticamente apos encerrado
         server.settimeout(0.5) 
         server.bind((HOST, PORT))
         server.listen()
@@ -116,6 +115,7 @@ if __name__ == "__main__":
         while True:
             try:
                 conn, addr = server.accept() # aceita novas conexões
+                # conexão com socket e endereço (IP e porta)
                 threading.Thread(target=handle, args=(conn, addr), daemon=True).start() # inicia uma thread handle() para cada nova conexão (cliente)
             except socket.timeout: 
                 continue

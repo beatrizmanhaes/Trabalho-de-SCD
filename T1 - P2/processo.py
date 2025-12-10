@@ -2,8 +2,7 @@ import socket, sys, time, datetime, os
 
 # Configurações do Processo
 HOST, PORT, F_SIZE = '127.0.0.1', 5000, 10 # endIP, porta e tamanho fixo das mensagens 
-# K_SLEEP permanece fixo, mas REPETICOES agora é lido de sys.argv
-K_SLEEP = 1 # k = 1 segundo # tempo que passará na RC
+K_SLEEP = 1 # k = 1 segundo, tempo que passará na RC
 
 # Requer que o ID do processo e o número de repetições (r) sejam passados como argumentos
 if len(sys.argv) != 3: 
@@ -12,8 +11,7 @@ if len(sys.argv) != 3:
 pid = sys.argv[1] # Armazena o ID do processo
 try:
     # REPETICOES é lido do segundo argumento (r)
-    REPETICOES = int(sys.argv[2]) 
-    # numero de vezes que o processo tentará entrar na RC
+    REPETICOES = int(sys.argv[2]) # numero de vezes que o processo tentará entrar na RC
 except ValueError:
     sys.exit("O segundo argumento (r_repeticoes) deve ser um número inteiro.")
 
